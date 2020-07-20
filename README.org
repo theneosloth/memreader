@@ -1,0 +1,5 @@
+* cl-memreader
+
+A  lisp implementation of [[https://docs.microsoft.com/en-us/windows/win32/toolhelp/taking-a-snapshot-and-viewing-processes][Taking a Snapshot and Viewing Processes]]
+
+In the future I hope to convert it into a library that allows for easy reading of windows process memory.
