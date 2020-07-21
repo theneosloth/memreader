@@ -18,85 +18,64 @@
     (let ((name (translate-camelcase-name spec :special-words '("32"))))
       (if varp (intern (format nil "*~a*" name)) name))))
 
-(defctype handle :uint32)
-(defctype pid :uint32)
+(defctype handle :pointer)
 (defctype dword :uint32)
 (defctype bool (:boolean :int))
+(defctype long :long)
+(defctype wchar :int16)
+(defctype tchar wchar)
+(defctype ulong-ptr #+32-bit :uint32 #+64-bit :uint64)
 
-;; Should be a specific char*. Might break stuff
-(defctype lpctstr :string)
-
-(defparameter +PROCESS-TERMINATE+ #x0010)
-(defparameter +PROCESS-QUERY-INFORMATION+ #x0400)
-
-(defcfun "OpenProcess" handle (dwDesiredAccess dword) (bInheritHandle bool) (dwProcessId dword))
-
-(defcfun "CloseHandle" handle (hobject handle))
-
-(defcfun "GetCurrentProcessId" pid)
-
-(defcfun "GetLastError" dword)
-
-(defcfun "FindWindowA" handle (lpClassName lpctstr) (lpWindowName lpctstr))
+(cffi:defcstruct process-entry-32
+  (size dword)
+  (usage dword)
+  (process-id dword)
+  (default-heap-id ulong-ptr)
+  (module-id dword)
+  (count-threads dword)
+  (parent-process-id dword)
+  (pri-class-base long)
+  (flags dword)
+  (exe-file wchar :count 260))
 
 
-(defparameter +TH32CS-INHERIT+ #x80000000)
-(defparameter +TH32CS-SNAPHEAPLIST+ #x00000001)
-(defparameter +TH32CS-SNAPMODULE+ #x00000008)
-(defparameter +TH32CS-SNAPMODULE32+ #x00000010)
-(defparameter +TH32CS-SNAPPROCESS+ #x00000002)
-(defparameter +TH32CS-SNAPTHREAD+ #x00000004)
+(defcfun "CreateToolhelp32Snapshot" handle (flags dword) (process-id dword))
 
-(defparameter +TH32CS-SNAPALL+ (logior
-                                +TH32CS-SNAPHEAPLIST+
-                                +TH32CS-SNAPMODULE+
-                                +TH32CS-SNAPPROCESS+
-                                +TH32CS-SNAPTHREAD+))
+(defcfun (process-32-first "Process32FirstW") bool (snapshot handle) (lppe :pointer (:struct tag-process-entry-32)))
 
-(defparameter +MAX-PATH+ 260)
+(defcfun (process-32-next "Process32NextW") bool (snapshot handle) (lppe :pointer (:struct tag-process-entry-32)))
 
-(defcfun "CreateToolhelp32Snapshot" handle (dwFlags dword) (th32ProcessId dword))
+(defcfun "CloseHandle" handle (object handle))
 
-(defcfun "Process32First" :bool (hSnapshot handle) (lppe :pointer))
 
-(defcfun "Process32Next" :bool (hSnapshot handle) (lppe :pointer))
-
-(defcstruct tag-process-entry-32
-  (dwSize dword)
-  (cntUsage dword)
-  (th32Processid dword)
-  ;; ULONG pointer
-  (th32DefaultHeapID :pointer)
-  (cntThreads dword)
-  (th32ParentProcessID dword)
-  (pcPriClassBase :long)
-  (dwFlags dword)
-  (szExeFile :char :count 260))
+(defun string-to-lisp (chars &optional count)
+  (values
+   (cffi:foreign-string-to-lisp
+    chars
+    :count (and count (* count (cffi:foreign-type-size 'tchar)))
+    :encoding +win32-string-encoding+)))
 
 (defun main ()
   (get-process-list))
 
-
 (defun get-process-list ()
-  (with-foreign-object (pe32 '(:struct tag-process-entry-32))
+  (with-foreign-object (pe32 '(:struct process-entry-32))
     (let ((hprocess-snap
             (create-toolhelp-32-snapshot +TH32CS-SNAPPROCESS+ 0)))
 
       (unwind-protect (progn
-                        (when (= hprocess-snap -1)
+                        (when (cffi:pointer-eq hprocess-snap +invalid-handle-value+)
                           (error "CreateToolHelp32Snapshot failed"))
 
-
-                        (setf (foreign-slot-value pe32 '(:struct tag-process-entry-32) 'dwSize)
-                              (foreign-type-size '(:struct tag-process-entry-32)))
-
-                        (unless (process-32-first hprocess-snap pe32)
-                          (error "First process unsuccessful"))
+                        (setf (foreign-slot-value pe32 '(:struct process-entry-32) 'size)
+                              (foreign-type-size '(:struct process-entry-32)))
 
                         (unless (process-32-first hprocess-snap pe32)
                           (error "First process unsuccessful"))
 
                         (loop while (process-32-next hprocess-snap pe32)
                               do (format t "Process Name: ~a ~%"
-                                         (foreign-slot-value pe32 '(:struct tag-process-entry-32) 'th32processid))))
+                                         (string-to-lisp
+                                          (foreign-slot-value pe32 '(:struct process-entry-32) 'exe-file)))))
+
         (close-handle hprocess-snap)))))
